@@ -4,7 +4,7 @@ require 'json'
 require 'sketchup'
 
 module HingeDistributor
-  PLUGIN_VERSION = "1.0.1"
+  PLUGIN_VERSION = "1.0.2"
   GITHUB_USER    = "byurii94"
   GITHUB_REPO    = "hinge_distributor"
   GITHUB_BRANCH  = "main"
@@ -632,7 +632,7 @@ module HingeDistributor
               let fixedSum = 0;
 
               for (let i = 0; i < numGaps; i++) {
-                const val = parseNum(rawInputs[i]);
+                const val = parseNum(rawInputs ? rawInputs[i] : '');
                 if (!isNaN(val) && val >= 0) {
                   const r = round1(val);
                   fixedVals[i] = r;
@@ -679,7 +679,7 @@ module HingeDistributor
                 }
               }
 
-              result[last_auto_idx] = round1(Math.max(0, totalLen - sumBeforeLast));
+              result[lastAutoIdx] = round1(Math.max(0, totalLen - sumBeforeLast));
               return { gaps: result, error: '' };
             }
 
@@ -766,7 +766,7 @@ module HingeDistributor
               syncAndNotify();
             }
 
-            document.getElementById('num_items').addEventListener('input', (e) => {
+            function handleCountChange(e) {
               const rawCount = parseInt(e.target.value, 10);
               const count = Math.max(1, isNaN(rawCount) ? 1 : rawCount);
 
@@ -775,7 +775,11 @@ module HingeDistributor
               const calc = computeGapsPreview(edgeLenMm, count, rawGaps);
               renderGaps(count, rawGaps, calc.gaps);
               syncAndNotify();
-            });
+            }
+
+            const numItemsEl = document.getElementById('num_items');
+            numItemsEl.addEventListener('input', handleCountChange);
+            numItemsEl.addEventListener('change', handleCountChange);
 
             document.getElementById('applyBtn').addEventListener('click', () => {
               const rawCount = parseInt(document.getElementById('num_items').value, 10);
