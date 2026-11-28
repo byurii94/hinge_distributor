@@ -3,12 +3,14 @@
 require 'json'
 require 'sketchup'
 
-module HingeDistributor
+module FurnitureDistributor
   PLUGIN_VERSION = "1.0.2"
   GITHUB_USER    = "byurii94"
-  GITHUB_REPO    = "hinge_distributor"
+  GITHUB_REPO    = "furniture_distributor"
   GITHUB_BRANCH  = "main"
   RAW_BASE_URL   = "https://raw.githubusercontent.com/#{GITHUB_USER}/#{GITHUB_REPO}/#{GITHUB_BRANCH}"
+
+  @http_requests = []
 
   def self.parse_float(val)
     return val.to_f if val.is_a?(Numeric)
@@ -20,7 +22,7 @@ module HingeDistributor
     val.to_s.tr(',', '.').to_i
   end
 
-  # Порівняння версій типу "1.0.10" > "1.0.2"
+  # Порівняння версій типу "1.0.10" > "1.0.3"
   def self.version_newer?(remote_ver, local_ver)
     r_parts = remote_ver.to_s.strip.split('.').map(&:to_i)
     l_parts = local_ver.to_s.strip.split('.').map(&:to_i)
@@ -34,10 +36,19 @@ module HingeDistributor
     false
   end
 
+  def self.send_http_get(url, &callback)
+    req = Sketchup::Http::Request.new(url, Sketchup::Http::GET)
+    @http_requests << req
+
+    req.start do |request, response|
+      @http_requests.delete(req)
+      callback.call(request, response)
+    end
+  end
+
   def self.check_for_updates(silent: true)
     url = "#{RAW_BASE_URL}/version.json?t=#{Time.now.to_i}"
-    req = Sketchup::Http::Request.new(url, Sketchup::Http::GET)
-    req.start do |request, response|
+    send_http_get(url) do |_request, response|
       if response.nil? || response.status_code != 200
         unless silent
           UI.messagebox("Не вдалося перевірити оновлення на GitHub (код: #{response ? response.status_code : 'немає з’єднання'}).")
@@ -59,7 +70,7 @@ module HingeDistributor
       end
 
       notes = data["notes"].to_s.strip
-      msg = "Доступна нова версія «Розкладки завіс»: v#{remote_ver} (поточна: v#{PLUGIN_VERSION})."
+      msg = "Доступна нова версія «Розкладки фурнітури»: v#{remote_ver} (поточна: v#{PLUGIN_VERSION})."
       msg += "\n\nЗміни:\n#{notes}" unless notes.empty?
       msg += "\n\nОновити плагін зараз?"
 
@@ -73,8 +84,7 @@ module HingeDistributor
     plugin_dir = File.dirname(__FILE__)
     cache_bust = "t=#{Time.now.to_i}"
 
-    main_req = Sketchup::Http::Request.new("#{RAW_BASE_URL}/main.rb?#{cache_bust}", Sketchup::Http::GET)
-    main_req.start do |_request, response|
+    send_http_get("#{RAW_BASE_URL}/main.rb?#{cache_bust}") do |_request, response|
       if response.nil? || response.status_code != 200 || response.body.to_s.strip.empty?
         UI.messagebox("Не вдалося завантажити main.rb з GitHub.")
         next
@@ -86,8 +96,7 @@ module HingeDistributor
 
         # Опціонально оновлюємо іконки, якщо вони є в репозиторії
         %w[hinge_16.png hinge_24.png].each do |icon_name|
-          icon_req = Sketchup::Http::Request.new("#{RAW_BASE_URL}/images/#{icon_name}?#{cache_bust}", Sketchup::Http::GET)
-          icon_req.start do |_ireq, ires|
+          send_http_get("#{RAW_BASE_URL}/images/#{icon_name}?#{cache_bust}") do |_ireq, ires|
             if ires && ires.status_code == 200 && !ires.body.to_s.empty?
               img_dir = File.join(plugin_dir, "images")
               Dir.mkdir(img_dir) unless Dir.exist?(img_dir)
@@ -103,7 +112,7 @@ module HingeDistributor
     end
   end
 
-  class HingeEdgeTool
+  class FurnitureEdgeTool
     def initialize(donors)
       @donors = donors.map do |ent|
         {
@@ -138,7 +147,7 @@ module HingeDistributor
       @generated = false
       names = @donors.map { |d| d[:entity].name.to_s.empty? ? "Група" : d[:entity].name }.join(" + ")
       Sketchup.set_status_text(
-        "🔩 РОЗКЛАДКА ЗАВІС ПО ЦЕНТРУ (#{names}) | Наведіть на ребро фасаду та клікніть | ESC = Вихід"
+        "🔩 РОЗКЛАДКА ФУРНІТУРИ ПО ЦЕНТРУ (#{names}) | Наведіть на ребро деталі та клікніть | ESC = Вихід"
       )
       Sketchup.active_model.active_view&.invalidate
     end
@@ -148,19 +157,19 @@ module HingeDistributor
       view.invalidate if view
     end
 
-    def onCancel(reason, view)
+    def onCancel(_reason, view)
       close_dialog
       view.invalidate if view
     end
 
-    def onKeyDown(key, repeat, flags, view)
+    def onKeyDown(key, _repeat, _flags, _view)
       if key == 27
         close_dialog
         Sketchup.active_model.select_tool(nil)
       end
     end
 
-    def onMouseMove(flags, x, y, view)
+    def onMouseMove(_flags, x, y, view)
       return if @selected_edge
 
       edge, tr = pick_edge_at(view, x, y)
@@ -174,14 +183,14 @@ module HingeDistributor
           )
         else
           Sketchup.set_status_text(
-            "🔩 Наведіть курсор на ребро фасаду вздовж якого розкласти завісу | ESC = Вихід"
+            "🔩 Наведіть курсор на ребро деталі, вздовж якого розкласти фурнітуру | ESC = Вихід"
           )
         end
         view.invalidate
       end
     end
 
-    def onLButtonDown(flags, x, y, view)
+    def onLButtonDown(_flags, x, y, view)
       return if @selected_edge
 
       edge, tr = pick_edge_at(view, x, y)
@@ -279,7 +288,7 @@ module HingeDistributor
       [nil, Geom::Transformation.new]
     end
 
-    def calculate_hinge_gaps(total_len_mm, num_items, raw_inputs)
+    def calculate_furniture_gaps(total_len_mm, num_items, raw_inputs)
       num_gaps = num_items + 1
       fixed_vals = Array.new(num_gaps, nil)
       auto_indices = []
@@ -288,7 +297,7 @@ module HingeDistributor
       num_gaps.times do |i|
         raw = raw_inputs ? raw_inputs[i] : nil
         if !raw.nil? && !raw.to_s.strip.empty?
-          val = HingeDistributor.parse_float(raw)
+          val = FurnitureDistributor.parse_float(raw)
           if val >= 0.0
             r = val.round(1)
             fixed_vals[i] = r
@@ -328,7 +337,7 @@ module HingeDistributor
 
     def recompute_layout!
       n = @params[:num_items]
-      @gaps_mm = calculate_hinge_gaps(@edge_length_mm, n, @raw_gaps)
+      @gaps_mm = calculate_furniture_gaps(@edge_length_mm, n, @raw_gaps)
 
       positions = []
       acc = 0.0
@@ -352,8 +361,8 @@ module HingeDistributor
       close_dialog
 
       @dialog = UI::HtmlDialog.new(
-        dialog_title: "Розкладка завіс по ребру",
-        preferences_key: "HingeDistributorDialog",
+        dialog_title: "Розкладка фурнітури по ребру",
+        preferences_key: "FurnitureDistributorDialog",
         scrollable: true,
         resizable: true,
         width: 440,
@@ -361,7 +370,7 @@ module HingeDistributor
         style: UI::HtmlDialog::STYLE_DIALOG
       )
 
-      @dialog.set_html(build_hinge_dialog_html)
+      @dialog.set_html(build_furniture_dialog_html)
 
       @dialog.add_action_callback("ready") do |_ctx|
         send_init_data
@@ -374,7 +383,7 @@ module HingeDistributor
 
       @dialog.add_action_callback("apply") do |_ctx, json_str|
         apply_data_from_js(json_str)
-        if generate_hinges
+        if generate_furniture
           close_dialog
           Sketchup.active_model.select_tool(nil)
         end
@@ -392,7 +401,7 @@ module HingeDistributor
 
     def apply_data_from_js(json_str)
       data = JSON.parse(json_str)
-      n = [HingeDistributor.parse_int(data["num_items"]), 1].max
+      n = [FurnitureDistributor.parse_int(data["num_items"]), 1].max
       @params[:num_items] = n
 
       @raw_gaps = Array.new(n + 1) { |i| data["raw_gaps"] ? data["raw_gaps"][i].to_s : "" }
@@ -401,14 +410,14 @@ module HingeDistributor
 
     def send_init_data
       return unless @dialog
-      donor_text = @donors.length == 2 ? "2 групи (завіса + планка)" : "1 група"
+      donor_text = @donors.length == 2 ? "2 групи фурнітури" : "1 група фурнітури"
       payload = {
         axis_length: @edge_length_mm.round(1),
         donor_label: donor_text,
         num_items: @params[:num_items],
         gaps: @gaps_mm
       }
-      @dialog.execute_script("initHingeDialog(#{payload.to_json});")
+      @dialog.execute_script("initFurnitureDialog(#{payload.to_json});")
     end
 
     def close_dialog
@@ -419,7 +428,7 @@ module HingeDistributor
       end
     end
 
-    def generate_hinges
+    def generate_furniture
       valid_donors = @donors.select { |d| d[:entity] && d[:entity].valid? }
       if valid_donors.empty? || !valid_layout?
         UI.messagebox("Перевірте обрані групи-донори та задані проміжки (чи не перевищують довжину ребра).")
@@ -427,7 +436,7 @@ module HingeDistributor
       end
 
       model = Sketchup.active_model
-      model.start_operation("Розкладка завіс (#{@params[:num_items]} шт.)", true)
+      model.start_operation("Розкладка фурнітури (#{@params[:num_items]} шт.)", true)
 
       begin
         @positions_mm.each_with_index do |pos_mm, idx|
@@ -464,7 +473,7 @@ module HingeDistributor
                        end
             next unless copy_ent
 
-            copy_ent.name = ent.name.to_s.empty? ? "Завіса #{idx + 1}" : ent.name
+            copy_ent.name = ent.name.to_s.empty? ? "Фурнітура #{idx + 1}" : ent.name
             copy_ent.material = ent.material if ent.material
             copy_ent.layer = ent.layer if ent.layer
 
@@ -483,12 +492,12 @@ module HingeDistributor
         true
       rescue => e
         model.abort_operation
-        UI.messagebox("Помилка при створенні завіс: #{e.message}")
+        UI.messagebox("Помилка при створенні фурнітури: #{e.message}")
         false
       end
     end
 
-    def build_hinge_dialog_html
+    def build_furniture_dialog_html
       <<~HTML
         <!DOCTYPE html>
         <html lang="uk">
@@ -593,7 +602,7 @@ module HingeDistributor
           </div>
 
           <div class="card">
-            <label for="num_items">Кількість завіс (шт.)</label>
+            <label for="num_items">Кількість елементів фурнітури (шт.)</label>
             <input type="number" id="num_items" step="1" min="1" max="30" value="2">
           </div>
 
@@ -601,10 +610,10 @@ module HingeDistributor
             <label>Проміжки вздовж ребра (мм — порожнє = авто, залишок після округлення до 0.1 в останній)</label>
             <div id="gapsContainer"></div>
             <div class="error-text hidden" id="gapError"></div>
-            <div class="hint">Червоні точки та жовтий пунктир у 3D показують позиції завіс.</div>
+            <div class="hint">Червоні точки та жовтий пунктир у 3D показують позиції центрів фурнітури.</div>
           </div>
 
-          <button class="btn-apply" id="applyBtn">Створити завіси</button>
+          <button class="btn-apply" id="applyBtn">Створити фурнітуру</button>
 
           <script>
             let edgeLenMm = 0;
@@ -751,10 +760,10 @@ module HingeDistributor
               }
             }
 
-            function initHingeDialog(data) {
+            function initFurnitureDialog(data) {
               edgeLenMm = parseFloat(data.axis_length) || 0;
               document.getElementById('lenBadge').textContent = 'Довжина ребра: ' + edgeLenMm + ' мм';
-              document.getElementById('donorMeta').textContent = 'Донор: ' + (data.donor_label || '1 група');
+              document.getElementById('donorMeta').textContent = 'Донор: ' + (data.donor_label || '1 група фурнітури');
 
               const count = Math.max(1, parseInt(data.num_items, 10) || 2);
               document.getElementById('num_items').value = count;
@@ -806,27 +815,27 @@ module HingeDistributor
     model = Sketchup.active_model
     donors = model.selection.select { |e| e.is_a?(Sketchup::Group) || e.is_a?(Sketchup::ComponentInstance) }.first(2)
     if donors.empty?
-      UI.messagebox("Спочатку оберіть 1 або 2 групи (завісу та/або монтажну планку), а потім запустіть інструмент.")
+      UI.messagebox("Спочатку оберіть 1 або 2 групи фурнітури, а потім запустіть інструмент.")
       return
     end
-    model.select_tool(HingeEdgeTool.new(donors))
+    model.select_tool(FurnitureEdgeTool.new(donors))
   end
 
   unless file_loaded?(__FILE__)
     ext_menu = UI.menu("Extensions")
-    ext_menu.add_item("Розкладка завіс по ребру") { run }
-    ext_menu.add_item("Перевірити оновлення (Розкладка завіс)") { check_for_updates(silent: false) }
+    ext_menu.add_item("Розкладка фурнітури по ребру") { run }
+    ext_menu.add_item("Перевірити оновлення (Розкладка фурнітури)") { check_for_updates(silent: false) }
 
     path = File.dirname(__FILE__)
-    hinge_cmd = UI::Command.new("Розкладка завіс по ребру") { run }
-    hinge_cmd.tooltip = "Обрати 1–2 групи завіс/планки та розкласти вздовж ребра з проміжками"
+    furniture_cmd = UI::Command.new("Розкладка фурнітури по ребру") { run }
+    furniture_cmd.tooltip = "Обрати 1–2 групи фурнітури та розкласти вздовж ребра з проміжками"
     h16 = File.join(path, "images", "hinge_16.png")
     h24 = File.join(path, "images", "hinge_24.png")
-    hinge_cmd.small_icon = h16 if File.exist?(h16)
-    hinge_cmd.large_icon = h24 if File.exist?(h24)
+    furniture_cmd.small_icon = h16 if File.exist?(h16)
+    furniture_cmd.large_icon = h24 if File.exist?(h24)
 
-    toolbar = UI::Toolbar.new("Розкладка завіс")
-    toolbar.add_item(hinge_cmd)
+    toolbar = UI::Toolbar.new("Розкладка фурнітури")
+    toolbar.add_item(furniture_cmd)
     toolbar.restore
 
     # Тиха перевірка при старті SketchUp
