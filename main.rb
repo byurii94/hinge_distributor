@@ -4,7 +4,7 @@ require 'json'
 require 'sketchup'
 
 module FurnitureDistributor
-  PLUGIN_VERSION = "1.0.2"
+  PLUGIN_VERSION = "1.0.3"
   GITHUB_USER    = "byurii94"
   GITHUB_REPO    = "furniture_distributor"
   GITHUB_BRANCH  = "main"
