@@ -221,7 +221,7 @@ module FurnitureDistributor
       view.invalidate
     end
 
-    def draw(view)
+  def draw(view)
       if @selected_edge.nil? && @hover_edge && @hover_edge.valid?
         pts = [
           @hover_edge.start.position.transform(@hover_tr),
@@ -245,20 +245,36 @@ module FurnitureDistributor
       gap_len   = 12.0.mm
       half_span = 220.0.mm
 
-      horiz = @edge_dir * Geom::Vector3d.new(0, 1, 0)
-      horiz = @edge_dir * Geom::Vector3d.new(1, 0, 0) if horiz.length < 1e-6
-      horiz.normalize!
+      # Строго ортогональні напрямки по світових осях (без "косих" ліній від камери)
+      axes = [
+        Geom::Vector3d.new(1, 0, 0),
+        Geom::Vector3d.new(0, 1, 0),
+        Geom::Vector3d.new(0, 0, 1)
+      ]
+      perps = axes.filter_map do |ax|
+        v = @edge_dir * ax
+        v.length > 1e-6 ? v.normalize : nil
+      end
+
+      # Обираємо той перпендикуляр, який найменше направлений на камеру (щоб не стискався в точку)
+      view_dir = (view.camera.eye - @edge_start)
+      view_dir.normalize! if view_dir.length > 1e-6
+      perp = perps.min_by { |v| (v % view_dir).abs } || perps.first
+
+      cam_vec = view.camera.eye - @edge_start
+      cam_dir = cam_vec.length > 1e-6 ? cam_vec.normalize : perp
+      lift = Geom::Vector3d.new(cam_dir.x * 0.5.mm, cam_dir.y * 0.5.mm, cam_dir.z * 0.5.mm)
 
       @positions_mm.each do |pos_mm|
-        pt = @edge_start.offset(@edge_dir, pos_mm.mm)
+        pt = @edge_start.offset(@edge_dir, pos_mm.mm) + lift
 
         view.line_width = 2
         view.drawing_color = Sketchup::Color.new(245, 158, 11)
         [-1.0, 1.0].each do |dir_sign|
           cur = 0.0
           while cur < half_span
-            s0 = pt.offset(horiz, dir_sign * cur)
-            s1 = pt.offset(horiz, dir_sign * [cur + dash_len, half_span].min)
+            s0 = pt.offset(perp, dir_sign * cur)
+            s1 = pt.offset(perp, dir_sign * [cur + dash_len, half_span].min)
             view.draw(GL_LINES, [s0, s1])
             cur += dash_len + gap_len
           end
